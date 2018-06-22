@@ -26,28 +26,28 @@ public class ProxyPoolService {
     private static Lock staticLock = new ReentrantLock(true);
 
     public static ProxyPoolService getInstance() {
-        ProxyPoolService result = initInstance(null, null);
+        ProxyPoolService result = initInstance(null, null, null);
         return result != null ? result : instance;
     }
 
     public static ProxyPoolService initInstance(TestCase testCase) {
-        return initInstance(null, testCase);
+        return initInstance(null, testCase, null);
     }
 
 
     public static ProxyPoolService initInstance(Dns dns) {
-        return initInstance(dns, null);
+        return initInstance(dns, null, null);
     }
 
 //    private static class Instance {
 //        private static final ProxyPoolService instance = new ProxyPoolService();
 //    }
 
-    public static ProxyPoolService initInstance(Dns dns, TestCase testCase) {
+    public static ProxyPoolService initInstance(Dns dns, TestCase testCase, AutoCloseJedisPool j) {
         staticLock.lock();
         try {
             if (instance == null) {
-                instance = new ProxyPoolService(dns, testCase);
+                instance = new ProxyPoolService(dns, testCase, j);
                 return instance;
             } else {
 //                System.err.println("[ERROR]ProxyPoolService:Init has been ran");
@@ -73,7 +73,7 @@ public class ProxyPoolService {
     private Proxy last;
     private ThreadPoolExecutor initExecutor;
 
-    private ProxyPoolService(Dns dns, TestCase testCase) {
+    private ProxyPoolService(Dns dns, TestCase testCase, AutoCloseJedisPool j) {
         if (testCase != null) {
             this.testCase = testCase;
         } else {
@@ -91,6 +91,13 @@ public class ProxyPoolService {
         }
         this.dns = dns;
 
+        if (j != null) {
+            if (this.jedis != null) {
+                this.jedis.close();
+            }
+            this.jedis = j;
+        }
+
         ThreadPoolExecutor service = new ThreadPoolExecutor(8, 8,
                 0L, TimeUnit.MILLISECONDS,
                 new LinkedBlockingQueue<Runnable>());
@@ -101,8 +108,8 @@ public class ProxyPoolService {
 
             @Override
             public void run() {
-                long size = jedis.call(jedis -> jedis.zcard("proxy"));
-                Set<String> proxy = jedis.call(jedis -> jedis.zrevrange("proxy", 0, size));
+                long size = ProxyPoolService.this.jedis.call(jedis -> jedis.zcard("proxy"));
+                Set<String> proxy = ProxyPoolService.this.jedis.call(jedis -> jedis.zrevrange("proxy", 0, size));
                 if (proxy != null) {
                     System.out.println(proxy.size());
                     for (String p : proxy) {
@@ -126,7 +133,7 @@ public class ProxyPoolService {
             @Override
             public void run() {
                 long time = System.currentTimeMillis();
-                Set<String> proxy = jedis.call(jedis ->
+                Set<String> proxy = ProxyPoolService.this.jedis.call(jedis ->
                         jedis.zrevrangeByScore(
                                 "proxy",
                                 time / 3600000d,
